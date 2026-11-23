@@ -1,0 +1,80 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+body {
+  width: 300px;
+  padding: 18px;
+  background: #0b1020;
+  color: white;
+  font-family: system-ui, sans-serif;
+}
+h2 { margin-top: 0; }
+input, button {
+  width: 100%;
+  padding: 11px;
+  margin: 7px 0;
+  box-sizing: border-box;
+  border-radius: 7px;
+  border: 1px solid #334155;
+}
+input {
+  background: #151d30;
+  color: white;
+}
+button {
+  background: #2563eb;
+  color: white;
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.secondary { background: #334155; }
+#message {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 10px;
+}
+.hint {
+  font-size: 12px;
+  color: #94a3b8;
+  margin: 10px 0 4px;
+  line-height: 1.4;
+}
+.sync { background: #16834a; }
+.settings { background: #b45309; }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<h2>☁ GTA Cloud Sync</h2>
+
+<div id="loginView">
+  <input id="email" type="email" placeholder="Email">
+  <input id="password" type="password" placeholder="Password">
+
+  <button id="login">Login</button>
+  <button id="signup" class="secondary">Create account</button>
+</div>
+
+<div id="accountView" class="hidden">
+  <p>Logged in as:</p>
+  <strong id="accountEmail"></strong>
+  <p class="hint">
+    Keep <strong>playgta5.com</strong> open in a tab for Sync and Inject.
+  </p>
+  <button id="sync" class="sync">Sync now</button>
+  <button id="restore">Inject cloud save</button>
+  <button id="manual" class="sync">Upload save file</button>
+  <button id="graphics" class="settings">Graphics settings</button>
+  <input id="manualFile" type="file" hidden>
+  <button id="logout" class="secondary">Logout</button>
+</div>
+
+<div id="message">Connecting...</div>
+
+<script src="popup.js"></script>
+</body>
+</html>
