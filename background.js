@@ -192,7 +192,7 @@ async function listSaves() {
   const session = await getSession();
 
   const query = new URLSearchParams({
-    select: "file_path,file_size,checksum,updated_at,game_mtime",
+    select: "file_path,object_key,file_size,checksum,updated_at,game_mtime",
     user_id: `eq.${session.user.id}`,
     site_id: `eq.${SITE}`,
     order: "updated_at.desc"
@@ -203,8 +203,8 @@ async function listSaves() {
   return res.json();
 }
 
-async function downloadSave(path) {
-  const key = await getObjectKey(path);
+async function downloadSave(path, objectKey) {
+  const key = objectKey || await getObjectKey(path);
 
   const res = await api(
     `/storage/v1/object/authenticated/${BUCKET}/${key}`
@@ -254,7 +254,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return listSaves();
 
       case "DOWNLOAD":
-        return downloadSave(message.path);
+        return downloadSave(message.path, message.objectKey);
 
       default:
         throw new Error("Unknown request");

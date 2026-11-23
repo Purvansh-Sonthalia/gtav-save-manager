@@ -27,6 +27,7 @@
           "https://www.playgta5.com/*"
         ],
         "js": [
+          "save-paths.js",
           "content.js",
           "settings-panel.js"
         ],

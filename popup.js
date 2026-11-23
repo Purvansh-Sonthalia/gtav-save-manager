@@ -22,16 +22,6 @@ function toBase64(bytes) {
   return btoa(binary);
 }
 
-function savePathForFile(name) {
-  const base = name.replace(/^.*[/\\]/, "");
-
-  if (/^(SGTA|MISREP)/i.test(base)) {
-    return "/userdata/Documents/" + base;
-  }
-
-  return "/userdata/" + base;
-}
-
 async function call(type, extra = {}) {
   const result = await chrome.runtime.sendMessage({
     type,
@@ -144,7 +134,13 @@ $("manualFile").onchange = async event => {
   if (!file) return;
 
   try {
-    const path = savePathForFile(file.name);
+    let profileDir = DEFAULT_PROFILE_DIR;
+
+    try {
+      profileDir = await pageAction("GET_PROFILE_DIR") || DEFAULT_PROFILE_DIR;
+    } catch (_) {}
+
+    const path = savePathForFile(file.name, profileDir);
 
     message("Uploading " + path + "...");
 

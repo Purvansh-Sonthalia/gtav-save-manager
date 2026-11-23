@@ -9,26 +9,17 @@
     const knownHashes = new Map();
     let busy = false;
     let loggedIn = false;
+    let panelStatusEl = null;
+    let panelShowReload = null;
   
     function send(type, extra = {}) {
       return chrome.runtime.sendMessage({ type, ...extra });
     }
   
     function notify(message) {
-      const el = document.getElementById("gta-cloud-status");
-      if (el) el.textContent = message;
+      if (panelStatusEl) panelStatusEl.textContent = message;
     }
 
-    function savePathForFile(name) {
-      const base = name.replace(/^.*[/\\]/, "");
-
-      if (/^(SGTA|MISREP)/i.test(base)) {
-        return "/userdata/Documents/" + base;
-      }
-
-      return "/userdata/" + base;
-    }
-  
     function bytesOf(data) {
       if (data instanceof ArrayBuffer) {
         return new Uint8Array(data);
@@ -69,30 +60,40 @@
         .join("");
     }
   
-    async function openDB() {
-      // Avoid creating an empty database on unrelated pages.
-      if (indexedDB.databases) {
+    async function openDB({ create = false } = {}) {
+      if (!create && indexedDB.databases) {
         const databases = await indexedDB.databases();
-  
+
         if (!databases.some(db => db.name === DB_NAME)) {
           throw new Error("PlayGTA5 save database not found");
         }
       }
-  
+
       return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, 1);
-  
-        request.onupgradeneeded = event => {
-          if (event.oldVersion === 0) {
-            request.transaction.abort();
+
+        request.onupgradeneeded = () => {
+          const db = request.result;
+
+          if (!db.objectStoreNames.contains(STORE)) {
+            db.createObjectStore(STORE);
           }
         };
-  
+
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
     }
   
+    async function resolveProfileDir() {
+      try {
+        const records = await readAll();
+        return profileDirFromRecords(records);
+      } catch {
+        return DEFAULT_PROFILE_DIR;
+      }
+    }
+
     async function readAll() {
       const db = await openDB();
   
@@ -217,16 +218,25 @@
         }
   
         const downloaded = [];
+        const skipped = [];
   
         for (const save of saves) {
           notify("Downloading " + save.file_path + "...");
   
           const result = await send("DOWNLOAD", {
-            path: save.file_path
+            path: save.file_path,
+            objectKey: save.object_key
           });
   
           if (!result.success) {
-            throw new Error(result.error);
+            const err = result.error || "";
+
+            if (/not_found|NoSuchKey|404/i.test(err)) {
+              skipped.push(save.file_path);
+              continue;
+            }
+
+            throw new Error(err);
           }
   
           const binary = atob(result.result.data);
@@ -236,7 +246,6 @@
             bytes[i] = binary.charCodeAt(i);
           }
   
-          // Check integrity before restoring.
           const actualHash = await hash(bytes);
   
           if (actualHash !== save.checksum) {
@@ -251,21 +260,36 @@
             mtime: Number(save.game_mtime) || Date.now()
           });
         }
+
+        if (!downloaded.length) {
+          notify(
+            "No cloud files could be downloaded. " +
+            (skipped.length
+              ? skipped.length + " missing in storage (re-upload or Sync now). "
+              : "") +
+            "Stale rows stay in the cloud list until replaced."
+          );
+          return;
+        }
+
+        const profileDir = await resolveProfileDir();
   
-        const db = await openDB();
-  
+        const db = await openDB({ create: true });
+
         try {
           await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, "readwrite");
             const store = tx.objectStore(STORE);
-  
+
             for (const file of downloaded) {
+              const localPath = localPathForInject(file.path, profileDir);
+
               store.put({
                 data: file.data,
                 mtime: file.mtime
-              }, file.path);
+              }, localPath);
             }
-  
+
             tx.oncomplete = resolve;
             tx.onerror = () => reject(tx.error);
             tx.onabort = () => reject(tx.error);
@@ -273,15 +297,28 @@
         } finally {
           db.close();
         }
-  
+
         knownHashes.clear();
-  
-        notify(
+
+        const pathList = downloaded
+          .map(f => localPathForInject(f.path, profileDir))
+          .join("\n");
+
+        let msg =
           downloaded.length +
-          " files restored. Reload PlayGTA5 to apply them."
-        );
-  
-        document.getElementById("gta-cloud-reload").hidden = false;
+          " file(s) in IndexedDB under " +
+          profileDir +
+          ". Reload the full game tab (not just canvas). " +
+          "Use Story Mode; drop newgame=1 from the URL.\n" +
+          pathList;
+
+        if (skipped.length) {
+          msg += "\n\nSkipped (missing in storage):\n" + skipped.join("\n");
+        }
+
+        notify(msg);
+
+        panelShowReload?.();
   
       } catch (error) {
         notify("Restore failed: " + error.message);
@@ -353,6 +390,9 @@
       document.documentElement.appendChild(host);
   
       const get = id => shadow.getElementById(id);
+
+      panelStatusEl = get("gta-cloud-status");
+      panelShowReload = () => { get("reload").hidden = false; };
   
       get("close").onclick = () => host.remove();
   
@@ -377,7 +417,10 @@
         if (!file) return;
 
         try {
-          const path = savePathForFile(file.name);
+          const path = savePathForFile(
+            file.name,
+            await resolveProfileDir()
+          );
 
           notify("Uploading " + path + "...");
 
@@ -399,7 +442,7 @@
         }
       };
   
-      return get("gta-cloud-status");
+      return panelStatusEl;
     }
   
     const initialStatus = createPanel();
@@ -423,13 +466,21 @@
     });
 
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-      if (message.type !== "SYNC_NOW" && message.type !== "RESTORE") {
+      if (
+        message.type !== "SYNC_NOW" &&
+        message.type !== "RESTORE" &&
+        message.type !== "GET_PROFILE_DIR"
+      ) {
         return;
       }
 
       const run = async () => {
         if (message.type === "SYNC_NOW") {
           return syncNow();
+        }
+
+        if (message.type === "GET_PROFILE_DIR") {
+          return resolveProfileDir();
         }
 
         return restore();
