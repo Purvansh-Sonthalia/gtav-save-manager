@@ -109,8 +109,23 @@
     let panelStatusEl = null;
     let panelShowReload = null;
   
+    const RELOAD_EXTENSION_MSG =
+      "Extension was updated — reload this tab (F5), then try again.";
+
     function send(type, extra = {}) {
-      return chrome.runtime.sendMessage({ type, ...extra });
+      if (!chrome.runtime?.id) {
+        return Promise.resolve({
+          success: false,
+          error: RELOAD_EXTENSION_MSG
+        });
+      }
+
+      return chrome.runtime.sendMessage({ type, ...extra }).catch(err => ({
+        success: false,
+        error: /context invalidated/i.test(String(err))
+          ? RELOAD_EXTENSION_MSG
+          : err?.message || String(err)
+      }));
     }
   
     function notify(message) {
@@ -197,9 +212,9 @@
     async function resolveProfileDir() {
       try {
         const records = await readAll();
-        return profileDirFromRecords(records);
+        return profileDirFromRecords(records, isProHost());
       } catch {
-        return DEFAULT_PROFILE_DIR;
+        return defaultSaveDir(isProHost());
       }
     }
 
@@ -389,7 +404,11 @@
             const injected = [];
 
             for (const file of downloaded) {
-              const localPath = pathForInject(file.path, profileDir);
+              const localPath = pathForInject(
+                file.path,
+                profileDir,
+                isProHost()
+              );
               if (!localPath) {
                 skipped.push(file.path + " (invalid userdata path)");
                 continue;
@@ -418,7 +437,9 @@
         knownHashes.clear();
 
         const pathList = downloaded
-          .map(f => pathForInject(f.path, profileDir) || f.path)
+          .map(
+            f => pathForInject(f.path, profileDir, isProHost()) || f.path
+          )
           .join("\n");
 
         let msg =
@@ -495,7 +516,7 @@
           <button class="restore" id="restore">Inject cloud save</button>
           <button class="sync" id="manual">Upload save file</button>
           <button class="settings" id="graphics">Graphics settings</button>
-          <input id="manualFile" type="file" accept=".bak,.Bak,.BAK,.xml,.XMl,application/octet-stream" hidden>
+          <input id="manualFile" type="file" accept="*/*" hidden>
           <button class="reload" id="reload" hidden>Reload game</button>
   
           <div class="status" id="gta-cloud-status">
@@ -536,7 +557,8 @@
         try {
           const path = savePathForFile(
             file.name,
-            await resolveProfileDir()
+            await resolveProfileDir(),
+            isProHost()
           );
 
           notify("Uploading " + path + "...");

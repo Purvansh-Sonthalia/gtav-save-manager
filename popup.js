@@ -1,6 +1,13 @@
 
 const $ = id => document.getElementById(id);
 
+const RELOAD_EXTENSION_MSG =
+  "Extension was updated — reload the popup and game tab, then try again.";
+
+function isExtensionInvalidated(err) {
+  return /context invalidated/i.test(String(err?.message || err));
+}
+
 function message(text) {
   $("message").textContent = text;
 }
@@ -23,13 +30,20 @@ function toBase64(bytes) {
 }
 
 async function call(type, extra = {}) {
-  const result = await chrome.runtime.sendMessage({
-    type,
-    ...extra
-  });
+  if (!chrome.runtime?.id) {
+    throw new Error(RELOAD_EXTENSION_MSG);
+  }
 
-  if (!result.success) {
-    throw new Error(result.error);
+  let result;
+  try {
+    result = await chrome.runtime.sendMessage({ type, ...extra });
+  } catch (err) {
+    if (isExtensionInvalidated(err)) throw new Error(RELOAD_EXTENSION_MSG);
+    throw err;
+  }
+
+  if (!result?.success) {
+    throw new Error(result?.error || "Request failed.");
   }
 
   return result.result;
@@ -42,6 +56,16 @@ const GAME_TAB_URLS = [
   "https://playgta5.com/*",
   "https://www.playgta5.com/*"
 ];
+
+async function gameTabIsPro() {
+  const [tab] = await chrome.tabs.query({ url: GAME_TAB_URLS });
+  if (!tab?.url) return true;
+  try {
+    return /(?:^|\.)playgta5\.pro$/i.test(new URL(tab.url).hostname);
+  } catch {
+    return true;
+  }
+}
 
 async function pageAction(type) {
   const [tab] = await chrome.tabs.query({ url: GAME_TAB_URLS });
@@ -61,12 +85,10 @@ async function pageAction(type) {
 
     return result.result;
   } catch (e) {
+    if (isExtensionInvalidated(e)) throw new Error(RELOAD_EXTENSION_MSG);
     if (e.message?.includes("Receiving end does not exist")) {
-      throw new Error(
-        "Reload the game tab, then try again."
-      );
+      throw new Error("Reload the game tab, then try again.");
     }
-
     throw e;
   }
 }
@@ -159,13 +181,14 @@ $("manualFile").onchange = async event => {
   if (!file) return;
 
   try {
-    let profileDir = DEFAULT_PROFILE_DIR;
+    const isPro = await gameTabIsPro();
+    let profileDir = defaultSaveDir(isPro);
 
     try {
-      profileDir = await pageAction("GET_PROFILE_DIR") || DEFAULT_PROFILE_DIR;
+      profileDir = (await pageAction("GET_PROFILE_DIR")) || profileDir;
     } catch (_) {}
 
-    const path = savePathForFile(file.name, profileDir);
+    const path = savePathForFile(file.name, profileDir, isPro);
 
     message("Uploading " + path + "...");
 
