@@ -3,12 +3,24 @@ const GTA_SAVE_ROOT = "/userdata/Documents/Rockstar Games/GTA V";
 const DEFAULT_PROFILE_DIR = `${GTA_SAVE_ROOT}/Profiles/Default`;
 
 function normalizeSaveBase(name) {
-  const base = name.replace(/^.*[/\\]/, "");
+  let base = name.replace(/^.*[/\\]/, "");
 
-  if (/^SGTA/i.test(base) && !base.endsWith(".")) return base + ".";
-  if (/^MISREP/i.test(base) && !base.endsWith(".")) return base + ".";
+  if (/^SGTA|^MISREP/i.test(base) && /\.bak$/i.test(base)) {
+    base = base.replace(/\.bak$/i, "");
+  }
+
+  if (/^SGTA|^MISREP/i.test(base) && base.endsWith(".")) {
+    base = base.slice(0, -1);
+  }
 
   return base;
+}
+
+function normalizeUserdataFilePath(path) {
+  const p = String(path).replace(/\\/g, "/");
+  const slash = p.lastIndexOf("/");
+  if (slash < 0) return normalizeSaveBase(p);
+  return p.slice(0, slash + 1) + normalizeSaveBase(p.slice(slash + 1));
 }
 
 function profileDirFromRecords(records) {
@@ -41,4 +53,30 @@ function localPathForInject(cloudPath, profileDir) {
   }
 
   return `${dir}/${normalized}`;
+}
+
+function validUserdataPath(value) {
+  if (typeof value !== "string") return false;
+
+  const p = value.replace(/\\/g, "/");
+  if (!p.startsWith("/userdata/") || p.length > 1024 || !p.slice(10)) {
+    return false;
+  }
+
+  return !p.split("/").slice(2).some(s =>
+    !s ||
+    s === "." ||
+    s === ".." ||
+    /[<>:"|?*\x00-\x1f]/.test(s) ||
+    /[. ]$/.test(s) ||
+    /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(s)
+  );
+}
+
+function pathForInject(cloudPath, profileDir) {
+  const direct = normalizeUserdataFilePath(cloudPath);
+  if (validUserdataPath(direct)) return direct;
+
+  const mapped = localPathForInject(cloudPath, profileDir);
+  return validUserdataPath(mapped) ? mapped : null;
 }

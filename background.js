@@ -139,6 +139,10 @@ async function uploadSave({ path, data, mtime }) {
     throw new Error("Invalid save path");
   }
 
+  const gameMtime = Number.isFinite(Number(mtime))
+    ? Math.trunc(Number(mtime))
+    : Date.now();
+
   const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
   const key = await getObjectKey(path);
 
@@ -180,7 +184,7 @@ async function uploadSave({ path, data, mtime }) {
         file_size: bytes.length,
         checksum,
         updated_at: new Date().toISOString(),
-        game_mtime: mtime
+        game_mtime: gameMtime
       })
     }
   );

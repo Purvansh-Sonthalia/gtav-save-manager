@@ -35,13 +35,21 @@ async function call(type, extra = {}) {
   return result.result;
 }
 
+const GAME_TAB_URLS = [
+  "https://cdn.playgta5.pro/*",
+  "https://playgta5.pro/*",
+  "https://www.playgta5.pro/*",
+  "https://playgta5.com/*",
+  "https://www.playgta5.com/*"
+];
+
 async function pageAction(type) {
-  const [tab] = await chrome.tabs.query({
-    url: ["https://playgta5.com/*", "https://www.playgta5.com/*"]
-  });
+  const [tab] = await chrome.tabs.query({ url: GAME_TAB_URLS });
 
   if (!tab?.id) {
-    throw new Error("Open playgta5.com in a tab first.");
+    throw new Error(
+      "Open cdn.playgta5.pro (or playgta5.com) in a tab first."
+    );
   }
 
   try {
@@ -55,7 +63,7 @@ async function pageAction(type) {
   } catch (e) {
     if (e.message?.includes("Receiving end does not exist")) {
       throw new Error(
-        "Reload the playgta5.com tab, then try again."
+        "Reload the game tab, then try again."
       );
     }
 
@@ -99,7 +107,7 @@ $("signup").onclick = async () => {
 
 $("sync").onclick = async () => {
   try {
-    message("Syncing saves from playgta5.com...");
+    message("Syncing saves from the game tab...");
     await pageAction("SYNC_NOW");
     message("Sync finished. See the game tab panel for details.");
   } catch (e) {
@@ -109,7 +117,7 @@ $("sync").onclick = async () => {
 
 $("restore").onclick = async () => {
   try {
-    message("Opening inject on playgta5.com...");
+    message("Opening inject on the game tab...");
     await pageAction("RESTORE");
     message("Inject finished. See the game tab panel for details.");
   } catch (e) {
@@ -119,9 +127,26 @@ $("restore").onclick = async () => {
 
 $("graphics").onclick = async () => {
   try {
-    message("Opening graphics settings on playgta5.com...");
+    message("Opening graphics settings on the game tab...");
     await pageAction("OPEN_SETTINGS");
     message("Edit settings in the game tab.");
+  } catch (e) {
+    message(e.message);
+  }
+};
+
+$("launchCdn").onclick = async () => {
+  try {
+    const { playgta5Launch } = await chrome.storage.local.get("playgta5Launch");
+    const url = window.GTALaunchUrl.buildCdnUrl(
+      window.GTALaunchUrl.prefsFromStorage(playgta5Launch)
+    );
+    await chrome.tabs.create({ url });
+    message(
+      playgta5Launch
+        ? "Opened cdn.playgta5.pro with saved launch settings."
+        : "Opened cdn.playgta5.pro (default settings)."
+    );
   } catch (e) {
     message(e.message);
   }

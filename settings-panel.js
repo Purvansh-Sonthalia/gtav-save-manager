@@ -3,6 +3,12 @@
   if (window.__gtaSettingsPanelInstalled) return;
   window.__gtaSettingsPanelInstalled = true;
 
+  const isPro = /(?:^|\.)playgta5\.pro$/i.test(location.hostname);
+  if (isPro) {
+    window.__gtaInstallProSettingsPanel?.();
+    return;
+  }
+
   const PRESETS = {
     efficiency: {
       label: "Efficiency — 720p / 30 FPS / low profile",

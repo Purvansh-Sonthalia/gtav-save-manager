@@ -11,6 +11,9 @@
     "host_permissions": [
       "https://playgta5.com/*",
       "https://www.playgta5.com/*",
+      "https://cdn.playgta5.pro/*",
+      "https://playgta5.pro/*",
+      "https://www.playgta5.pro/*",
       "https://skoazyiuivhfaryemjqa.supabase.co/*"
     ],
     "background": {
@@ -24,11 +27,16 @@
       {
         "matches": [
           "https://playgta5.com/*",
-          "https://www.playgta5.com/*"
+          "https://www.playgta5.com/*",
+          "https://cdn.playgta5.pro/*",
+          "https://playgta5.pro/*",
+          "https://www.playgta5.pro/*"
         ],
         "js": [
           "save-paths.js",
           "content.js",
+          "playgta5-pro-launch.js",
+          "settings-panel-pro.js",
           "settings-panel.js"
         ],
         "run_at": "document_idle"

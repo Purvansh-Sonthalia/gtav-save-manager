@@ -5,7 +5,104 @@
   
     const DB_NAME = "gta5-userdata";
     const STORE = "files";
-  
+
+    function isProHost() {
+      return /(?:^|\.)playgta5\.pro$/i.test(location.hostname);
+    }
+
+    function ensureSaveProfileId() {
+      const sandbox =
+        new URLSearchParams(location.search).get("mode") === "sandbox";
+      const storyName = "gta5.userdata.profile.v2";
+      const sandboxName = "gta5.userdata.sandbox.profile.v1";
+      const name = sandbox ? sandboxName : storyName;
+      let p = localStorage.getItem(name);
+
+      if (!/^[0-9a-f]{32}$/i.test(p || "")) {
+        p = Array.from(crypto.getRandomValues(new Uint8Array(16)), x =>
+          x.toString(16).padStart(2, "0")
+        ).join("");
+        if (sandbox) {
+          const story = localStorage.getItem(storyName);
+          if (story && p === story) {
+            p = (parseInt(p[0], 16) ^ 1).toString(16) + p.slice(1);
+          }
+        }
+        localStorage.setItem(name, p);
+      }
+
+      return p;
+    }
+
+    function idbKeyForUserdataPath(userdataPath) {
+      if (!isProHost()) return userdataPath;
+      return `${ensureSaveProfileId()}\0${userdataPath}`;
+    }
+
+    function isStoryMode() {
+      const mode = new URLSearchParams(location.search).get("mode");
+      return mode !== "sandbox" && mode !== "env_test";
+    }
+
+    function idbSaveRecord(data, mtime) {
+      const bytes =
+        data instanceof Uint8Array ? data : new Uint8Array(data);
+      const t = Number(mtime);
+      return {
+        data: bytes,
+        mtime: Number.isFinite(t) ? Math.trunc(t) : Date.now()
+      };
+    }
+
+    function parseIdbEntry(key, value) {
+      const k = String(key);
+      if (k.startsWith("backup\0")) return null;
+      if (!value || value.deleted === true || value.data == null) return null;
+
+      let path;
+      if (k.startsWith("/userdata/")) {
+        path = k;
+      } else {
+        const sep = k.indexOf("\0");
+        if (sep <= 0) return null;
+        path = k.slice(sep + 1);
+        if (!path.startsWith("/userdata/")) return null;
+      }
+
+      path = normalizeUserdataFilePath(path);
+      if (!validUserdataPath(path)) return null;
+
+      return {
+        path,
+        idbKey: k,
+        data: value.data,
+        mtime: value.mtime
+      };
+    }
+
+    async function purgeInvalidIdbEntries(db) {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE, "readwrite");
+        const store = tx.objectStore(STORE);
+        const req = store.openCursor();
+
+        req.onsuccess = () => {
+          const cursor = req.result;
+          if (!cursor) return;
+
+          if (!parseIdbEntry(cursor.key, cursor.value)) {
+            store.delete(cursor.key);
+          }
+
+          cursor.continue();
+        };
+
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
     const knownHashes = new Map();
     let busy = false;
     let loggedIn = false;
@@ -61,16 +158,28 @@
     }
   
     async function openDB({ create = false } = {}) {
-      if (!create && indexedDB.databases) {
+      let openVersion;
+      if (indexedDB.databases) {
         const databases = await indexedDB.databases();
+        const existing = databases.find(db => db.name === DB_NAME);
 
-        if (!databases.some(db => db.name === DB_NAME)) {
-          throw new Error("PlayGTA5 save database not found");
+        if (!existing) {
+          if (!create) {
+            throw new Error("PlayGTA5 save database not found");
+          }
+          openVersion = 1;
         }
+      } else if (!create) {
+        throw new Error("PlayGTA5 save database not found");
+      } else {
+        openVersion = 1;
       }
 
       return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, 1);
+        const request =
+          openVersion != null
+            ? indexedDB.open(DB_NAME, openVersion)
+            : indexedDB.open(DB_NAME);
 
         request.onupgradeneeded = () => {
           const db = request.result;
@@ -96,30 +205,27 @@
 
     async function readAll() {
       const db = await openDB();
-  
+
       try {
         return await new Promise((resolve, reject) => {
           const tx = db.transaction(STORE, "readonly");
           const request = tx.objectStore(STORE).openCursor();
-          const records = [];
-  
+          const byPath = new Map();
+
           request.onsuccess = () => {
             const cursor = request.result;
-  
+
             if (!cursor) {
-              resolve(records);
+              resolve([...byPath.values()]);
               return;
             }
-  
-            records.push({
-              path: cursor.key,
-              data: cursor.value.data,
-              mtime: cursor.value.mtime
-            });
-  
+
+            const row = parseIdbEntry(cursor.key, cursor.value);
+            if (row) byPath.set(row.path, row);
+
             cursor.continue();
           };
-  
+
           request.onerror = () => reject(request.error);
         });
       } finally {
@@ -138,11 +244,7 @@
         let uploaded = 0;
   
         for (const record of records) {
-          if (
-            typeof record.path !== "string" ||
-            !record.path.startsWith("/") ||
-            record.path.includes("..")
-          ) continue;
+          if (!validUserdataPath(record.path)) continue;
   
           const bytes = bytesOf(record.data);
           const digest = await hash(bytes);
@@ -173,7 +275,9 @@
         notify(
           uploaded
             ? "Cloud synced: " + uploaded + " file(s)"
-            : "Cloud saves are up to date"
+            : records.length
+              ? "Cloud saves are up to date"
+              : "No save files found in this tab (play or save in-game first)."
         );
   
         return uploaded;
@@ -277,17 +381,30 @@
         const db = await openDB({ create: true });
 
         try {
+          await purgeInvalidIdbEntries(db);
+
           await new Promise((resolve, reject) => {
             const tx = db.transaction(STORE, "readwrite");
             const store = tx.objectStore(STORE);
+            const injected = [];
 
             for (const file of downloaded) {
-              const localPath = localPathForInject(file.path, profileDir);
+              const localPath = pathForInject(file.path, profileDir);
+              if (!localPath) {
+                skipped.push(file.path + " (invalid userdata path)");
+                continue;
+              }
 
-              store.put({
-                data: file.data,
-                mtime: file.mtime
-              }, localPath);
+              const record = idbSaveRecord(file.data, file.mtime);
+              store.put(record, idbKeyForUserdataPath(localPath));
+              if (isProHost() && isStoryMode()) {
+                store.put(record, localPath);
+              }
+              injected.push(localPath);
+            }
+
+            if (!injected.length) {
+              reject(new Error("No valid save paths to inject."));
             }
 
             tx.oncomplete = resolve;
@@ -301,7 +418,7 @@
         knownHashes.clear();
 
         const pathList = downloaded
-          .map(f => localPathForInject(f.path, profileDir))
+          .map(f => pathForInject(f.path, profileDir) || f.path)
           .join("\n");
 
         let msg =
@@ -378,7 +495,7 @@
           <button class="restore" id="restore">Inject cloud save</button>
           <button class="sync" id="manual">Upload save file</button>
           <button class="settings" id="graphics">Graphics settings</button>
-          <input id="manualFile" type="file" hidden>
+          <input id="manualFile" type="file" accept=".bak,.Bak,.BAK,.xml,.XMl,application/octet-stream" hidden>
           <button class="reload" id="reload" hidden>Reload game</button>
   
           <div class="status" id="gta-cloud-status">

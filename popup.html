@@ -45,6 +45,7 @@ button {
 }
 .sync { background: #16834a; }
 .settings { background: #b45309; }
+.launch { background: #7c3aed; }
 .hidden { display: none; }
 </style>
 </head>
@@ -63,19 +64,21 @@ button {
   <p>Logged in as:</p>
   <strong id="accountEmail"></strong>
   <p class="hint">
-    Keep <strong>playgta5.com</strong> open in a tab for Sync and Inject.
+    Keep <strong>cdn.playgta5.pro</strong> (or playgta5.com) open for Sync and Inject.
   </p>
   <button id="sync" class="sync">Sync now</button>
   <button id="restore">Inject cloud save</button>
   <button id="manual" class="sync">Upload save file</button>
   <button id="graphics" class="settings">Graphics settings</button>
-  <input id="manualFile" type="file" hidden>
+  <button id="launchCdn" class="launch">Launch CDN with settings</button>
+  <input id="manualFile" type="file" accept=".bak,.Bak,.BAK,.xml,.XMl,application/octet-stream" hidden>
   <button id="logout" class="secondary">Logout</button>
 </div>
 
 <div id="message">Connecting...</div>
 
 <script src="save-paths.js"></script>
+<script src="playgta5-pro-launch.js"></script>
 <script src="popup.js"></script>
 </body>
 </html>
