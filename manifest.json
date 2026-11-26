@@ -4,6 +4,11 @@
     "name": "GTA Cloud Sync",
     "version": "1.0.0",
     "description": "Back up, restore, and manage PlayGTA5 saves and graphics settings via Supabase.",
+    "icons": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
     "permissions": [
       "storage",
       "tabs"
@@ -21,7 +26,13 @@
     },
     "action": {
       "default_popup": "popup.html",
-      "default_title": "GTA Cloud Sync"
+      "default_title": "GTA Cloud Sync",
+      "default_icon": {
+        "16": "icons/icon16.png",
+        "32": "icons/icon48.png",
+        "48": "icons/icon48.png",
+        "128": "icons/icon128.png"
+      }
     },
     "content_scripts": [
       {
