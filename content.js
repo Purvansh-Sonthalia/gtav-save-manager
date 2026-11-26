@@ -104,6 +104,8 @@
     }
 
     const knownHashes = new Map();
+    const AUTO_UPLOAD_MS = 30_000;
+    let autoUploadTimer = null;
     let busy = false;
     let loggedIn = false;
     let panelStatusEl = null;
@@ -248,29 +250,57 @@
       }
     }
   
-    async function capture(onlyChanged = true) {
-      if (!loggedIn || busy) return;
-  
+    async function refreshKnownHashes() {
+      knownHashes.clear();
+      const records = await readAll();
+
+      for (const record of records) {
+        if (!validUserdataPath(record.path)) continue;
+        knownHashes.set(record.path, await hash(bytesOf(record.data)));
+      }
+    }
+
+    function stopAutoUploadLoop() {
+      if (autoUploadTimer != null) {
+        clearInterval(autoUploadTimer);
+        autoUploadTimer = null;
+      }
+    }
+
+    async function startAutoUploadLoop() {
+      stopAutoUploadLoop();
+      await refreshKnownHashes();
+      await chrome.storage.local.set({ autoUploadActive: true });
+
+      autoUploadTimer = setInterval(() => {
+        capture(true, { quiet: true }).catch(error =>
+          notify("Auto-sync: " + error.message)
+        );
+      }, AUTO_UPLOAD_MS);
+    }
+
+    async function capture(onlyChanged = true, { quiet = false } = {}) {
+      if (!loggedIn || busy) return 0;
+
       busy = true;
-  
+
       try {
         const records = await readAll();
-  
+
         let uploaded = 0;
-  
+
         for (const record of records) {
           if (!validUserdataPath(record.path)) continue;
-  
+
           const bytes = bytesOf(record.data);
           const digest = await hash(bytes);
-  
-          if (
-            onlyChanged &&
-            knownHashes.get(record.path) === digest
-          ) continue;
-  
-          notify("Uploading " + record.path + "...");
-  
+
+          if (onlyChanged && knownHashes.get(record.path) === digest) {
+            continue;
+          }
+
+          if (!quiet) notify("Uploading " + record.path + "...");
+
           const result = await send("UPLOAD", {
             record: {
               path: record.path,
@@ -278,32 +308,36 @@
               mtime: record.mtime
             }
           });
-  
+
           if (!result.success) {
             throw new Error(result.error);
           }
-  
+
           knownHashes.set(record.path, digest);
           uploaded++;
         }
-  
-        notify(
-          uploaded
-            ? "Cloud synced: " + uploaded + " file(s)"
-            : records.length
-              ? "Cloud saves are up to date"
-              : "No save files found in this tab (play or save in-game first)."
-        );
-  
+
+        if (quiet) {
+          if (uploaded) notify("Auto-synced " + uploaded + " save(s) to cloud.");
+        } else {
+          notify(
+            uploaded
+              ? "Cloud synced: " + uploaded + " file(s)"
+              : records.length
+                ? "Cloud saves are up to date"
+                : "No save files found in this tab (play or save in-game first)."
+          );
+        }
+
         return uploaded;
       } catch (error) {
-        notify("Sync error: " + error.message);
+        notify(quiet ? "Auto-sync: " + error.message : "Sync error: " + error.message);
         throw error;
       } finally {
         busy = false;
       }
     }
-  
+
     async function syncNow() {
       knownHashes.clear();
       return capture(false);
@@ -434,8 +468,6 @@
           db.close();
         }
 
-        knownHashes.clear();
-
         const pathList = downloaded
           .map(
             f => pathForInject(f.path, profileDir, isProHost()) || f.path
@@ -454,8 +486,10 @@
           msg += "\n\nSkipped (missing in storage):\n" + skipped.join("\n");
         }
 
+        msg += "\n\nAuto cloud backup every 30s while this tab is open.";
         notify(msg);
 
+        await startAutoUploadLoop();
         panelShowReload?.();
   
       } catch (error) {
@@ -599,10 +633,16 @@
   
       initialStatus.textContent =
         "Connected as " + result.result.email;
+
+      chrome.storage.local.get("autoUploadActive", data => {
+        if (data.autoUploadActive) startAutoUploadLoop();
+      });
   
     }).catch(error => {
       initialStatus.textContent = error.message;
     });
+
+    addEventListener("pagehide", () => stopAutoUploadLoop());
 
     chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (
